@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+.vs/
+publish/
+installer/output/
+*.user
+*.pfx

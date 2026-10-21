@@ -1,0 +1,49 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.408
+      - name: Validate tag
+        shell: pwsh
+        run: if ($env:GITHUB_REF_NAME -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Tag must match vX.Y.Z' }
+      - run: dotnet restore DashForge.sln
+      - run: dotnet build DashForge.sln -c Release --no-restore
+      - run: dotnet test DashForge.sln -c Release --no-build
+      - name: Publish app
+        shell: pwsh
+        run: |
+          dotnet publish src/DashForge.App/DashForge.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish/app
+          if (!(Test-Path publish/app/DashForge.exe)) { throw 'Published executable missing' }
+      - name: Package portable ZIP
+        shell: pwsh
+        run: Compress-Archive -Path publish/app/* -DestinationPath "DashForge-Portable-$env:GITHUB_REF_NAME.zip"
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/DashForge.iss
+          if (!(Test-Path installer/output/DashForge-Setup-0.1.0.exe)) { throw 'Installer missing' }
+      - name: Checksums and metadata
+        shell: pwsh
+        run: |
+          $files = @("DashForge-Portable-$env:GITHUB_REF_NAME.zip", "installer/output/DashForge-Setup-0.1.0.exe")
+          foreach ($file in $files) { if (!(Test-Path $file)) { throw "Missing artifact: $file" } }
+          $lines = foreach ($file in $files) { $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower(); "$hash  $file" }
+          $lines | Set-Content SHA256SUMS.txt
+          @{ version=$env:GITHUB_REF_NAME; artifacts=$files; signed=$false } | ConvertTo-Json -Depth 4 | Set-Content release-metadata.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DashForge-Portable-${{ github.ref_name }}.zip
+            installer/output/DashForge-Setup-0.1.0.exe
+            SHA256SUMS.txt
+            release-metadata.json
