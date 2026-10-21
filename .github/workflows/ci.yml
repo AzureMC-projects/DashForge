@@ -1,0 +1,33 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.408
+      - run: dotnet restore DashForge.sln
+      - run: dotnet build DashForge.sln -c Release --no-restore
+      - run: dotnet test DashForge.sln -c Release --no-build
+      - run: dotnet publish src/DashForge.App/DashForge.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish/app
+      - name: Validate publish
+        shell: pwsh
+        run: if (!(Test-Path publish/app/DashForge.exe)) { throw 'DashForge.exe missing' }
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Compile installer
+        shell: pwsh
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/DashForge.iss'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashforge-ci
+          path: |
+            publish/app/**
+            installer/output/**
